@@ -8,6 +8,15 @@ from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from deepctr_torch.inputs import SparseFeat, DenseFeat, get_feature_names
 from deepctr_torch.models import *
 
+
+
+def count_parameters(model):
+    total_para = 0
+    for name,parameters in model.named_parameters():
+        print(name,':',parameters.size())
+        total_para += parameters.numel()
+    print("+++++++++ Total parameter cnt: ", total_para, "+++++++++", flush=True)
+
 if __name__ == "__main__":
     data = pd.read_csv('./criteo_sample.txt')
 
@@ -27,7 +36,7 @@ if __name__ == "__main__":
 
     # 2.count #unique features for each sparse field,and record dense feature field name
 
-    fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique())
+    fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique(), 16)
                               for feat in sparse_features] + [DenseFeat(feat, 1, )
                                                               for feat in dense_features]
 
@@ -54,6 +63,8 @@ if __name__ == "__main__":
     model = DeepFM(linear_feature_columns=linear_feature_columns, dnn_feature_columns=dnn_feature_columns,
                    task='binary',
                    l2_reg_embedding=1e-5, device=device)
+    #print(model)
+    count_parameters(model)
 
     model.compile("adagrad", "binary_crossentropy",
                   metrics=["binary_crossentropy", "auc"], )

@@ -17,6 +17,7 @@ import torch.utils.data as Data
 from sklearn.metrics import *
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import pdb
 
 try:
     from tensorflow.python.keras.callbacks import CallbackList
@@ -132,7 +133,7 @@ class BaseModel(nn.Module):
         self.history = History()
 
     def fit(self, x=None, y=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0.,
-            validation_data=None, shuffle=True, callbacks=None):
+            validation_data=None, shuffle=True, callbacks=None, summaryWriter=None):
         """
 
         :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -273,6 +274,9 @@ class BaseModel(nn.Module):
                 eval_result = self.evaluate(val_x, val_y, batch_size)
                 for name, result in eval_result.items():
                     epoch_logs["val_" + name] = result
+                    if summaryWriter is not None:
+                        summaryWriter.add_scalar("test/val_"+name, result, epoch*steps_per_epoch)
+
             # verbose
             if verbose > 0:
                 epoch_time = int(time.time() - start_time)
@@ -354,7 +358,6 @@ class BaseModel(nn.Module):
         if not support_dense and len(dense_feature_columns) > 0:
             raise ValueError(
                 "DenseFeat is not supported in dnn_feature_columns")
-
         sparse_embedding_list = [embedding_dict[feat.embedding_name](
             X[:, self.feature_index[feat.name][0]:self.feature_index[feat.name][1]].long()) for
             feat in sparse_feature_columns]

@@ -10,7 +10,9 @@ from itertools import chain
 import torch
 import torch.nn as nn
 import numpy as np
+import pdb
 
+from hashedEmbeddingBag import HashedEmbeddingBag, SecondaryLearnedEmbedding
 from .layers.sequence import SequencePoolingLayer
 from .layers.utils import concat_fun
 
@@ -19,11 +21,13 @@ DEFAULT_GROUP_NAME = "default_group"
 
 class SparseFeat(namedtuple('SparseFeat',
                             ['name', 'vocabulary_size', 'embedding_dim', 'use_hash', 'dtype', 'embedding_name',
-                             'group_name'])):
+                             'group_name', 'use_rma', 'hashed_weight', 'use_lma', 'signature', 'key_bits',
+                             'keys_to_use', 'use_rma_bern', 'bern_mlp_model', 'bern_embedding_dim'])):
     __slots__ = ()
 
     def __new__(cls, name, vocabulary_size, embedding_dim=4, use_hash=False, dtype="int32", embedding_name=None,
-                group_name=DEFAULT_GROUP_NAME):
+                group_name=DEFAULT_GROUP_NAME, use_rma=False, hashed_weight=None, use_lma=False, signature=None, key_bits=None,
+                keys_to_use=None, use_rma_bern=False, bern_mlp_model=None, bern_embedding_dim=None):
         if embedding_name is None:
             embedding_name = name
         if embedding_dim == "auto":
@@ -32,7 +36,8 @@ class SparseFeat(namedtuple('SparseFeat',
             print(
                 "Notice! Feature Hashing on the fly currently is not supported in torch version,you can use tensorflow version!")
         return super(SparseFeat, cls).__new__(cls, name, vocabulary_size, embedding_dim, use_hash, dtype,
-                                              embedding_name, group_name)
+                                              embedding_name, group_name, use_rma, hashed_weight, use_lma, signature, key_bits,
+                                              keys_to_use, use_rma_bern, bern_mlp_model, bern_embedding_dim)
 
     def __hash__(self):
         return self.name.__hash__()
@@ -163,11 +168,37 @@ def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, spar
     varlen_sparse_feature_columns = list(
         filter(lambda x: isinstance(x, VarLenSparseFeat), feature_columns)) if len(feature_columns) else []
 
-    embedding_dict = nn.ModuleDict(
-        {feat.embedding_name: nn.Embedding(feat.vocabulary_size, feat.embedding_dim if not linear else 1, sparse=sparse)
-         for feat in
-         sparse_feature_columns + varlen_sparse_feature_columns}
-    )
+    #embedding_dict = nn.ModuleDict(
+    #    {feat.embedding_name: nn.Embedding(feat.vocabulary_size, feat.embedding_dim if not linear else 1, sparse=sparse)
+    #     for feat in
+    #     sparse_feature_columns + varlen_sparse_feature_columns}
+    #)
+    dictionary = {}
+    val_offset = 0
+
+    for feat in sparse_feature_columns + varlen_sparse_feature_columns:
+        if feat.use_rma and (not linear):
+            weight_size = feat.hashed_weight.numel()
+            compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
+            dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, feat.embedding_dim, compression,
+                                                                _weight=feat.hashed_weight, val_offset=val_offset)
+            val_offset += feat.vocabulary_size
+        elif feat.use_lma and (not linear):
+            assert ( feat.signature is not None and feat.key_bits is not None and feat.keys_to_use is not None and feat.hashed_weight is not None)
+            weight_size = feat.hashed_weight.numel()
+            compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
+            dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, feat.embedding_dim, compression,
+                                                                signature = feat.signature, key_bits=feat.key_bits, keys_to_use = feat.keys_to_use,
+                                                                hmode="lma_hash", _weight=feat.hashed_weight, val_offset=val_offset)
+            val_offset += feat.vocabulary_size
+        elif feat.use_rma_bern and (not linear):
+            primary = HashedEmbeddingBag(feat.vocabulary_size, feat.bern_embedding_dim, 0.001 , # dummy compression
+                                                                val_offset=val_offset, keymode="keymode_static_pm")
+            dictionary[feat.embedding_name] = SecondaryLearnedEmbedding(primary, feat.bern_mlp_model)
+            val_offset += feat.vocabulary_size
+        else:
+            dictionary[feat.embedding_name] = nn.Embedding(feat.vocabulary_size, feat.embedding_dim if not linear else 1, sparse=sparse)
+    embedding_dict = nn.ModuleDict(dictionary)
 
     # for feat in varlen_sparse_feature_columns:
     #     embedding_dict[feat.embedding_name] = nn.EmbeddingBag(
@@ -180,6 +211,7 @@ def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, spar
 
 
 def input_from_feature_columns(self, X, feature_columns, embedding_dict, support_dense=True):
+    print("input_from_feature_columns")
     sparse_feature_columns = list(
         filter(lambda x: isinstance(x, SparseFeat), feature_columns)) if len(feature_columns) else []
     dense_feature_columns = list(
@@ -195,6 +227,7 @@ def input_from_feature_columns(self, X, feature_columns, embedding_dict, support
     sparse_embedding_list = [embedding_dict[feat.embedding_name](
         X[:, self.feature_index[feat.name][0]:self.feature_index[feat.name][1]].long()) for
         feat in sparse_feature_columns]
+
 
     varlen_sparse_embedding_list = get_varlen_pooling_list(self.embedding_dict, X, self.feature_index,
                                                            varlen_sparse_feature_columns, self.device)
