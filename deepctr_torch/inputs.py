@@ -177,17 +177,17 @@ def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, spar
     val_offset = 0
 
     for feat in sparse_feature_columns + varlen_sparse_feature_columns:
-        if feat.use_rma and (not linear):
+        if feat.use_rma :
             weight_size = feat.hashed_weight.numel()
             compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
-            dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, feat.embedding_dim, compression,
+            dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, 1 if linear else feat.embedding_dim, compression,
                                                                 _weight=feat.hashed_weight, val_offset=val_offset)
             val_offset += feat.vocabulary_size
-        elif feat.use_lma and (not linear):
+        elif feat.use_lma :
             assert ( feat.signature is not None and feat.key_bits is not None and feat.keys_to_use is not None and feat.hashed_weight is not None)
             weight_size = feat.hashed_weight.numel()
             compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
-            dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, feat.embedding_dim, compression,
+            dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, 1 if linear else feat.embedding_dim, compression,
                                                                 signature = feat.signature, key_bits=feat.key_bits, keys_to_use = feat.keys_to_use,
                                                                 hmode="lma_hash", _weight=feat.hashed_weight, val_offset=val_offset)
             val_offset += feat.vocabulary_size

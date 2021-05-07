@@ -26,14 +26,15 @@ def count_parameters(model):
     strr += "Total:" + str(total_para) + "\n"
     return strr
 
-def load_data_in_df(args):
+def load_data_in_df(args, config):
     sparse_features = ['C' + str(i) for i in range(1, 27)]
     dense_features = ['I' + str(i) for i in range(1, 14)]
     target = ['label']
 
     if args.test_run:
         print("SAMPLE RUN...")
-        df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
+        #df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
+        df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
 
         df[sparse_features] = df[sparse_features].fillna('-1', )
         df[dense_features] = df[dense_features].fillna(0, )
@@ -46,6 +47,12 @@ def load_data_in_df(args):
         df[dense_features] = mms.fit_transform(df[dense_features])
     else:
         handle = np.load("/home/apd10/dlrm/dlrm/input/data.npz")
+        if "data" in config:
+            if config["data"]["type"] == "le2":
+                print("Using le2 data")
+                handle = np.load("/home/apd10/dlrm/dlrm/input/data.le2.npz")
+            
+
         intdf = pd.DataFrame(handle['intF'], columns = dense_features)
         catdf = pd.DataFrame(handle['catF'], columns = sparse_features)
         labeldf = pd.DataFrame(handle['label'], columns = target)
@@ -59,6 +66,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', action="store", dest="config", type=str, default=None, required=True,
                     help="config to setup the training")
     parser.add_argument('--test_run', action="store_true", default=False)
+    parser.add_argument('--epochs', action="store", dest="epochs", default=30)
 
     args = parser.parse_args()
     config_file = args.config
@@ -73,9 +81,11 @@ if __name__ == "__main__":
     out_handle = open(config["results"] +".log", "a")
     if not args.test_run:
         sys.stdout = out_handle
+    else:
+        out_handle = sys.stdout
     
 
-    data = load_data_in_df(args)
+    data = load_data_in_df(args, config)
 
     sparse_features = ['C' + str(i) for i in range(1, 27)]
     dense_features = ['I' + str(i) for i in range(1, 14)]
@@ -144,21 +154,31 @@ if __name__ == "__main__":
         print('cuda ready...')
         device = 'cuda:0'
 
-    model = DeepFM(linear_feature_columns=linear_feature_columns, dnn_feature_columns=dnn_feature_columns,
-                   task='binary',
-                   l2_reg_embedding=1e-5, device=device)
-    #print(model)
+
+    #initialize model
+    if config["model"] == "deepfm":
+          params = config["deepfm"]
+          model = DeepFM(linear_feature_columns=linear_feature_columns, dnn_feature_columns=dnn_feature_columns,
+                    dnn_hidden_units=(400,400,400),
+                    dnn_dropout=0.5,
+                    task='binary',
+                    l2_reg_embedding=params["reg"], l2_reg_linear=params["reg"], device=device)
+    else:
+        raise NotImplementedError
+
+
+    print(model)
     strr = count_parameters(model)
     out_handle.write(strr)
     out_handle.flush()
 
-    model.compile("adagrad", "binary_crossentropy",
+    model.compile("adam", "binary_crossentropy",
                   metrics=["binary_crossentropy", "auc"], )
 
-    history = model.fit(train_model_input, train[target].values, batch_size=2048, epochs=20, verbose=2,
+    history = model.fit(train_model_input, train[target].values, batch_size=2048, epochs=int(args.epochs), verbose=2,
                         validation_split=0.2, summaryWriter=summaryWriter)
     pd.DataFrame(history.history).to_csv(config["results"]+".results.csv")
-    pred_ans = model.predict(test_model_input, 4096)
+    pred_ans = model.predict(test_model_input, 16348)
     out_handle.write("test LogLoss: "+str( round(log_loss(test[target].values, pred_ans), 4))+"\n")
     out_handle.write("test AUC"+str( round(roc_auc_score(test[target].values, pred_ans), 4))+"\n")
     out_handle.close()

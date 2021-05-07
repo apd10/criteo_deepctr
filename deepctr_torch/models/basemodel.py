@@ -235,7 +235,7 @@ class BaseModel(nn.Module):
             train_result = {}
             try:
                 with tqdm(enumerate(train_loader), disable=verbose != 1) as t:
-                    for _, (x_train, y_train) in t:
+                    for itr, (x_train, y_train) in t:
                         x = x_train.to(self.device).float()
                         y = y_train.to(self.device).float()
 
@@ -259,6 +259,17 @@ class BaseModel(nn.Module):
                                 train_result[name].append(metric_fun(
                                     y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64")))
 
+    
+                        if do_validation and (itr + 1) % 1000 == 0:
+                            eval_result = self.evaluate(val_x, val_y, batch_size)
+                            eval_str = "[{}:{}]interm ".format(epoch, itr)
+                            for name, result in eval_result.items():
+                                eval_str += "val_" + name + ":" +  str(result)
+                                if summaryWriter is not None:
+                                    summaryWriter.add_scalar("test_interim/val_"+name, result, epoch*steps_per_epoch + itr)
+
+                            print(eval_str, flush=True)
+
 
             except KeyboardInterrupt:
                 t.close()
@@ -275,7 +286,7 @@ class BaseModel(nn.Module):
                 for name, result in eval_result.items():
                     epoch_logs["val_" + name] = result
                     if summaryWriter is not None:
-                        summaryWriter.add_scalar("test/val_"+name, result, epoch*steps_per_epoch)
+                        summaryWriter.add_scalar("test/val_"+name, result, (epoch + 1) *steps_per_epoch)
 
             # verbose
             if verbose > 0:
@@ -304,7 +315,6 @@ class BaseModel(nn.Module):
 
     def evaluate(self, x, y, batch_size=256):
         """
-
         :param x: Numpy array of test data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).
         :param y: Numpy array of target (label) data (if the model has a single output), or list of Numpy arrays (if the model has multiple outputs).
         :param batch_size: Integer or `None`. Number of samples per evaluation step. If unspecified, `batch_size` will default to 256.
