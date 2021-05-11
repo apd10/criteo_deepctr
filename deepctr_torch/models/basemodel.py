@@ -260,14 +260,14 @@ class BaseModel(nn.Module):
                                     y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64")))
 
     
-                        if do_validation and (itr + 1) % 1000 == 0:
+                        if do_validation and ((itr + 1) % 1000 == 0):
                             eval_result = self.evaluate(val_x, val_y, batch_size)
                             eval_str = "[{}:{}]interm ".format(epoch, itr)
                             for name, result in eval_result.items():
                                 eval_str += "val_" + name + ":" +  str(result)
                                 if summaryWriter is not None:
-                                    summaryWriter.add_scalar("test_interim/val_"+name, result, epoch*steps_per_epoch + itr)
-
+                                    summaryWriter.add_scalar("test/val_"+name, result, epoch*steps_per_epoch + itr)
+                        
                             print(eval_str, flush=True)
 
 
@@ -286,7 +286,7 @@ class BaseModel(nn.Module):
                 for name, result in eval_result.items():
                     epoch_logs["val_" + name] = result
                     if summaryWriter is not None:
-                        summaryWriter.add_scalar("test/val_"+name, result, (epoch + 1) *steps_per_epoch)
+                        summaryWriter.add_scalar("test/val_"+name, result, (epoch + 1)*steps_per_epoch)
 
             # verbose
             if verbose > 0:

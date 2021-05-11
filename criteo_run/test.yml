@@ -1,7 +1,9 @@
-embedding:
-    size: 32
-    etype: "rma_bern"
-    rma_bern:
-        mlp: "128-512-256-128-32"
+model: "deepfm"
+deepfm:
+    reg: 0.01
 
-results: "./results/test"
+embedding:
+    size: 4
+    etype: "full"
+
+results: "./results/testX"

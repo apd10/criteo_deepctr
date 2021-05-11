@@ -33,8 +33,8 @@ def load_data_in_df(args, config):
 
     if args.test_run:
         print("SAMPLE RUN...")
-        #df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
-        df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
+        df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
+        #df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
 
         df[sparse_features] = df[sparse_features].fillna('-1', )
         df[dense_features] = df[dense_features].fillna(0, )
@@ -66,12 +66,13 @@ if __name__ == "__main__":
     parser.add_argument('--config', action="store", dest="config", type=str, default=None, required=True,
                     help="config to setup the training")
     parser.add_argument('--test_run', action="store_true", default=False)
-    parser.add_argument('--epochs', action="store", dest="epochs", default=30)
+    parser.add_argument('--epochs', action="store", dest="epochs", default=10, type=int)
 
     args = parser.parse_args()
     config_file = args.config
     with open(config_file, "r") as f:
         config = yaml.load(f)
+    print("config", config)
 
     summaryWriter = SummaryWriter()
     commandlinefile = summaryWriter.log_dir + "/cmd_args.txt" 
@@ -134,6 +135,7 @@ if __name__ == "__main__":
                                     for feat in sparse_features]  + [DenseFeat(feat, 1, ) for feat in dense_features]
     else:
         raise NotImplementedError
+    # Question(yanzhou): why dnn_feature_columns and linear_feature_columns are the same?
     dnn_feature_columns = fixlen_feature_columns
     linear_feature_columns = fixlen_feature_columns
 
@@ -163,6 +165,44 @@ if __name__ == "__main__":
                     dnn_dropout=0.5,
                     task='binary',
                     l2_reg_embedding=params["reg"], l2_reg_linear=params["reg"], device=device)
+    elif config["model"] == "dcn":
+        params = config["dcn"]
+        model = DCN(linear_feature_columns=linear_feature_columns, 
+        dnn_feature_columns=dnn_feature_columns, 
+        dnn_hidden_units=(1024,1024,1024,1024),
+        cross_num = 1,
+        l2_reg_linear = 0, l2_reg_embedding=0, l2_reg_cross =0, l2_reg_dnn=0,
+        device=device)
+    elif config["model"] == "onn":
+        params = config["onn"]
+        model = ONN(linear_feature_columns=linear_feature_columns, 
+        dnn_feature_columns=dnn_feature_columns, 
+        dnn_hidden_units=(400,400,400),
+        l2_reg_linear = 0, l2_reg_embedding=0, l2_reg_dnn=0,
+        device=device)
+    elif config["model"] =="fibinet":
+        params = config["fibinet"]
+        model = FiBiNET(linear_feature_columns=linear_feature_columns, 
+        dnn_feature_columns=dnn_feature_columns, 
+        dnn_hidden_units=(400,400,400),
+        dnn_dropout=0.5,
+        device=device)
+
+    elif config["model"] =="xdeepfm":
+        params = config["xdeepfm"]
+        model = xDeepFM(linear_feature_columns=linear_feature_columns, 
+        dnn_feature_columns=dnn_feature_columns,
+        dnn_hidden_units=(400,400,400),
+        cin_layer_size=(200,200,200),
+        dnn_dropout=0.5,
+        l2_reg_linear = 0.0001, l2_reg_embedding=0.0001, l2_reg_dnn=0.0001,
+        device=device)
+  
+    elif config["model"] =="autoint":
+        params = config["autoint"]
+        model = AutoInt(linear_feature_columns=linear_feature_columns, 
+        dnn_feature_columns=dnn_feature_columns, att_embedding_size=32, dnn_hidden_units=(400,400,400), l2_reg_dnn=0, l2_reg_embedding=0,
+        device=device)
     else:
         raise NotImplementedError
 
@@ -175,11 +215,10 @@ if __name__ == "__main__":
     model.compile("adam", "binary_crossentropy",
                   metrics=["binary_crossentropy", "auc"], )
 
-    history = model.fit(train_model_input, train[target].values, batch_size=2048, epochs=int(args.epochs), verbose=2,
+    history = model.fit(train_model_input, train[target].values, batch_size=config["train"]["batch_size"], epochs=args.epochs, verbose=2,
                         validation_split=0.2, summaryWriter=summaryWriter)
     pd.DataFrame(history.history).to_csv(config["results"]+".results.csv")
     pred_ans = model.predict(test_model_input, 16348)
     out_handle.write("test LogLoss: "+str( round(log_loss(test[target].values, pred_ans), 4))+"\n")
     out_handle.write("test AUC"+str( round(roc_auc_score(test[target].values, pred_ans), 4))+"\n")
     out_handle.close()
-
