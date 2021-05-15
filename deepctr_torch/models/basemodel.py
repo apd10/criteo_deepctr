@@ -132,8 +132,40 @@ class BaseModel(nn.Module):
         self.stop_training = False  # used for EarlyStopping
         self.history = History()
 
+
+    def validation_test_run(self, epochs, steps_per_epoch, epoch, itr, val_x, val_y, test_x, test_y, batch_size, min_test_iteration, best_metrics, summaryWriter):
+        validation_logs = {}
+        eval_result = self.evaluate(val_x, val_y, batch_size)
+        test_result = None
+        if ('auc' in eval_result) and (eval_result['auc'] > best_metrics['auc']):
+            best_metrics = eval_result.copy()
+            if (steps_per_epoch*epoch + itr + 1) > min_test_iteration and test_x is not None:
+                test_result = self.evaluate(test_x, test_y)
+    
+        for name, result in eval_result.items():
+            validation_logs['val_' + name] =  result
+            validation_logs['best_val_' + name] =  best_metrics[name]
+            if test_result is not None:
+                validation_logs['test_' + name] =  test_result[name]
+            else:
+                validation_logs['test_' + name] = -1
+
+
+            if summaryWriter is not None:
+                summaryWriter.add_scalar("test/val_"+name, result, epoch*steps_per_epoch + itr)
+                if test_result is not None:
+                    summaryWriter.add_scalar("test/test_"+name, test_result[name], epoch*steps_per_epoch + itr)
+        return validation_logs, best_metrics
+    def printLogInfo(self, epochs, steps_per_epoch, epoch, itr, logs):
+        eval_str = 'Epoch {0}:({1}/{2}) / {3}'.format(epoch, itr, steps_per_epoch, epochs)
+        for name in logs.keys():
+            eval_str += " - " + name + \
+                        ": {0: .4f}".format(logs[name])
+        print(eval_str, flush=True)
+
+        
     def fit(self, x=None, y=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0.,
-            validation_data=None, shuffle=True, callbacks=None, summaryWriter=None):
+            validation_data=None, shuffle=True, callbacks=None, summaryWriter=None, test_x=None, test_y=None, min_test_iteration=5000):
         """
 
         :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -226,6 +258,9 @@ class BaseModel(nn.Module):
         # Train
         print("Train on {0} samples, validate on {1} samples, {2} steps per epoch".format(
             len(train_tensor_data), len(val_y), steps_per_epoch))
+        best_metrics = {}
+        for name,_ in self.metrics.items():
+            best_metrics[name] = 0;
         for epoch in range(initial_epoch, epochs):
             callbacks.on_epoch_begin(epoch)
             epoch_logs = {}
@@ -261,14 +296,12 @@ class BaseModel(nn.Module):
 
     
                         if do_validation and ((itr + 1) % 1000 == 0):
-                            eval_result = self.evaluate(val_x, val_y, batch_size)
-                            eval_str = "[{}:{}]interm ".format(epoch, itr)
-                            for name, result in eval_result.items():
-                                eval_str += "val_" + name + ":" +  str(result)
-                                if summaryWriter is not None:
-                                    summaryWriter.add_scalar("test/val_"+name, result, epoch*steps_per_epoch + itr)
-                        
-                            print(eval_str, flush=True)
+                            validation_logs, best_metrics = self.validation_test_run(epochs, steps_per_epoch, epoch, itr, 
+                                                                                    val_x, val_y, test_x, test_y, batch_size, 
+                                                                                      min_test_iteration, best_metrics, summaryWriter)
+                            self.printLogInfo(epochs, steps_per_epoch, epoch, itr, validation_logs)
+
+                            
 
 
             except KeyboardInterrupt:
@@ -282,29 +315,16 @@ class BaseModel(nn.Module):
                 epoch_logs[name] = np.sum(result) / steps_per_epoch
 
             if do_validation:
-                eval_result = self.evaluate(val_x, val_y, batch_size)
-                for name, result in eval_result.items():
-                    epoch_logs["val_" + name] = result
-                    if summaryWriter is not None:
-                        summaryWriter.add_scalar("test/val_"+name, result, (epoch + 1)*steps_per_epoch)
+                validation_logs, best_metrics = self.validation_test_run(epochs, steps_per_epoch, epoch, itr, 
+                                                                         val_x, val_y, test_x, test_y, batch_size, 
+                                                                         min_test_iteration, best_metrics, summaryWriter)
+                epoch_logs.update(validation_logs)
 
             # verbose
             if verbose > 0:
                 epoch_time = int(time.time() - start_time)
-                print('Epoch {0}/{1}'.format(epoch + 1, epochs))
-
-                eval_str = "{0}s - loss: {1: .4f}".format(
-                    epoch_time, epoch_logs["loss"])
-
-                for name in self.metrics:
-                    eval_str += " - " + name + \
-                                ": {0: .4f}".format(epoch_logs[name])
-
-                if do_validation:
-                    for name in self.metrics:
-                        eval_str += " - " + "val_" + name + \
-                                    ": {0: .4f}".format(epoch_logs["val_" + name])
-                print(eval_str)
+                epoch_logs['time'] = epoch_time
+                self.printLogInfo(epochs, steps_per_epoch, epoch+1, 0, epoch_logs)
             callbacks.on_epoch_end(epoch, epoch_logs)
             if self.stop_training:
                 break

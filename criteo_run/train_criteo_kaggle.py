@@ -33,8 +33,8 @@ def load_data_in_df(args, config):
 
     if args.test_run:
         print("SAMPLE RUN...")
-        df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
-        #df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
+        #df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
+        df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
 
         df[sparse_features] = df[sparse_features].fillna('-1', )
         df[dense_features] = df[dense_features].fillna(0, )
@@ -214,11 +214,17 @@ if __name__ == "__main__":
 
     model.compile("adam", "binary_crossentropy",
                   metrics=["binary_crossentropy", "auc"], )
+    min_test_iteration = 15000 # end of 1 epoch
+    batch_size = config["train"]["batch_size"]
+    if args.test_run:
+        min_test_iteration = 1
+        batch_size = 1000
 
-    history = model.fit(train_model_input, train[target].values, batch_size=config["train"]["batch_size"], epochs=args.epochs, verbose=2,
-                        validation_split=0.2, summaryWriter=summaryWriter)
+    history = model.fit(train_model_input, train[target].values, batch_size=batch_size, epochs=args.epochs, verbose=2,
+                        validation_split=0.2, summaryWriter=summaryWriter, test_x = test_model_input, test_y = test[target].values,
+                        min_test_iteration = min_test_iteration)
     pd.DataFrame(history.history).to_csv(config["results"]+".results.csv")
-    pred_ans = model.predict(test_model_input, 16348)
-    out_handle.write("test LogLoss: "+str( round(log_loss(test[target].values, pred_ans), 4))+"\n")
-    out_handle.write("test AUC"+str( round(roc_auc_score(test[target].values, pred_ans), 4))+"\n")
+    #pred_ans = model.predict(test_model_input, 16348)
+    #out_handle.write("test LogLoss: "+str( round(log_loss(test[target].values, pred_ans), 4))+"\n")
+    #out_handle.write("test AUC"+str( round(roc_auc_score(test[target].values, pred_ans), 4))+"\n")
     out_handle.close()
