@@ -34,8 +34,8 @@ def load_data_in_df(args, config):
 
     if args.test_run:
         print("SAMPLE RUN...")
-        #df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
-        df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
+        df =  pd.read_csv('/home/apd10/DeepCTR-Torch/examples/criteo_sample.txt')
+        #df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
 
         df[sparse_features] = df[sparse_features].fillna('-1', )
         df[dense_features] = df[dense_features].fillna(0, )
@@ -172,7 +172,7 @@ if __name__ == "__main__":
                     dnn_hidden_units=(400,400,400),
                     dnn_dropout=0.5,
                     task='binary',
-                    l2_reg_embedding=params["reg"], l2_reg_linear=params["reg"], device=device, seed=model_seed)
+                    l2_reg_embedding=0, l2_reg_linear=0, device=device, seed=model_seed)
     elif config["model"] == "dcn":
         params = config["dcn"]
         model = DCN(linear_feature_columns=linear_feature_columns, 
