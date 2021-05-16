@@ -67,7 +67,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', action="store", dest="config", type=str, default=None, required=True,
                     help="config to setup the training")
     parser.add_argument('--test_run', action="store_true", default=False)
-    parser.add_argument('--epochs', action="store", dest="epochs", default=10, type=int)
+    parser.add_argument('--epochs', action="store", dest="epochs", default=25, type=int)
 
     args = parser.parse_args()
     config_file = args.config
