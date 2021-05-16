@@ -32,7 +32,7 @@ from ..callbacks import History
 
 
 class Linear(nn.Module):
-    def __init__(self, feature_columns, feature_index, init_std=0.0001, device='cpu'):
+    def __init__(self, feature_columns, feature_index, init_std=0.0001, device='cpu', seed=1024):
         super(Linear, self).__init__()
         self.feature_index = feature_index
         self.device = device
@@ -45,7 +45,7 @@ class Linear(nn.Module):
             filter(lambda x: isinstance(x, VarLenSparseFeat), feature_columns)) if len(feature_columns) else []
 
         self.embedding_dict = create_embedding_matrix(feature_columns, init_std, linear=True, sparse=False,
-                                                      device=device)
+                                                      device=device, seed=seed)
 
         #         nn.ModuleDict(
         #             {feat.embedding_name: nn.Embedding(feat.dimension, 1, sparse=True) for feat in
@@ -110,14 +110,14 @@ class BaseModel(nn.Module):
             linear_feature_columns + dnn_feature_columns)
         self.dnn_feature_columns = dnn_feature_columns
 
-        self.embedding_dict = create_embedding_matrix(dnn_feature_columns, init_std, sparse=False, device=device)
+        self.embedding_dict = create_embedding_matrix(dnn_feature_columns, init_std, sparse=False, device=device, seed=seed)
         #         nn.ModuleDict(
         #             {feat.embedding_name: nn.Embedding(feat.dimension, embedding_size, sparse=True) for feat in
         #              self.dnn_feature_columns}
         #         )
 
         self.linear_model = Linear(
-            linear_feature_columns, self.feature_index, device=device)
+            linear_feature_columns, self.feature_index, device=device, seed=seed)
 
         self.regularization_weight = []
 

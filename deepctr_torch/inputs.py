@@ -159,7 +159,7 @@ def get_varlen_pooling_list(embedding_dict, features, feature_index, varlen_spar
     return varlen_sparse_embedding_list
 
 
-def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, sparse=False, device='cpu'):
+def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, sparse=False, device='cpu', seed=1024):
     # Return nn.ModuleDict: for sparse features, {embedding_name: nn.Embedding}
     # for varlen sparse features, {embedding_name: nn.EmbeddingBag}
     sparse_feature_columns = list(
@@ -181,7 +181,7 @@ def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, spar
             weight_size = feat.hashed_weight.numel()
             compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
             dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, 1 if linear else feat.embedding_dim, compression,
-                                                                _weight=feat.hashed_weight, val_offset=val_offset)
+                                                                _weight=feat.hashed_weight, val_offset=val_offset, seed=seed)
             val_offset += feat.vocabulary_size
         elif feat.use_lma :
             assert ( feat.signature is not None and feat.key_bits is not None and feat.keys_to_use is not None and feat.hashed_weight is not None)
@@ -189,11 +189,11 @@ def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, spar
             compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
             dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, 1 if linear else feat.embedding_dim, compression,
                                                                 signature = feat.signature, key_bits=feat.key_bits, keys_to_use = feat.keys_to_use,
-                                                                hmode="lma_hash", _weight=feat.hashed_weight, val_offset=val_offset)
+                                                                hmode="lma_hash", _weight=feat.hashed_weight, val_offset=val_offset, seed=seed)
             val_offset += feat.vocabulary_size
         elif feat.use_rma_bern and (not linear):
             primary = HashedEmbeddingBag(feat.vocabulary_size, feat.bern_embedding_dim, 0.001 , # dummy compression
-                                                                val_offset=val_offset, keymode="keymode_static_pm")
+                                                                val_offset=val_offset, keymode="keymode_static_pm", seed=seed)
             dictionary[feat.embedding_name] = SecondaryLearnedEmbedding(primary, feat.bern_mlp_model)
             val_offset += feat.vocabulary_size
         else:

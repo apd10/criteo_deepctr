@@ -14,6 +14,7 @@ import yaml
 import json
 import pdb
 import sys
+import shutil
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -76,10 +77,13 @@ if __name__ == "__main__":
 
     summaryWriter = SummaryWriter()
     commandlinefile = summaryWriter.log_dir + "/cmd_args.txt" 
+    configfile = summaryWriter.log_dir + "/config.yml" 
+    shutil.copyfile(config_file, configfile)
     with open(commandlinefile, "w") as f:
        f.write(json.dumps(vars(args)))
+    
 
-    out_handle = open(config["results"] +".log", "a")
+    out_handle = open(summaryWriter.log_dir +"/res.log", "a")
     if not args.test_run:
         sys.stdout = out_handle
     else:
@@ -156,6 +160,10 @@ if __name__ == "__main__":
         print('cuda ready...')
         device = 'cuda:0'
 
+    if "seed" in config:
+        model_seed = config["seed"]
+    else:
+        model_seed = 1024 # default seed
 
     #initialize model
     if config["model"] == "deepfm":
@@ -164,7 +172,7 @@ if __name__ == "__main__":
                     dnn_hidden_units=(400,400,400),
                     dnn_dropout=0.5,
                     task='binary',
-                    l2_reg_embedding=params["reg"], l2_reg_linear=params["reg"], device=device)
+                    l2_reg_embedding=params["reg"], l2_reg_linear=params["reg"], device=device, seed=model_seed)
     elif config["model"] == "dcn":
         params = config["dcn"]
         model = DCN(linear_feature_columns=linear_feature_columns, 
@@ -172,21 +180,21 @@ if __name__ == "__main__":
         dnn_hidden_units=(1024,1024,1024,1024),
         cross_num = 1,
         l2_reg_linear = 0, l2_reg_embedding=0, l2_reg_cross =0, l2_reg_dnn=0,
-        device=device)
+        device=device, seed=model_seed)
     elif config["model"] == "onn":
         params = config["onn"]
         model = ONN(linear_feature_columns=linear_feature_columns, 
         dnn_feature_columns=dnn_feature_columns, 
         dnn_hidden_units=(400,400,400),
         l2_reg_linear = 0, l2_reg_embedding=0, l2_reg_dnn=0,
-        device=device)
+        device=device, seed=model_seed)
     elif config["model"] =="fibinet":
         params = config["fibinet"]
         model = FiBiNET(linear_feature_columns=linear_feature_columns, 
         dnn_feature_columns=dnn_feature_columns, 
         dnn_hidden_units=(400,400,400),
         dnn_dropout=0.5,
-        device=device)
+        device=device, seed=model_seed)
 
     elif config["model"] =="xdeepfm":
         params = config["xdeepfm"]
@@ -196,13 +204,13 @@ if __name__ == "__main__":
         cin_layer_size=(200,200,200),
         dnn_dropout=0.5,
         l2_reg_linear = 0.0001, l2_reg_embedding=0.0001, l2_reg_dnn=0.0001,
-        device=device)
+        device=device, seed=model_seed)
   
     elif config["model"] =="autoint":
         params = config["autoint"]
         model = AutoInt(linear_feature_columns=linear_feature_columns, 
         dnn_feature_columns=dnn_feature_columns, att_embedding_size=32, dnn_hidden_units=(400,400,400), l2_reg_dnn=0, l2_reg_embedding=0,
-        device=device)
+        device=device, seed=model_seed)
     else:
         raise NotImplementedError
 
@@ -223,7 +231,7 @@ if __name__ == "__main__":
     history = model.fit(train_model_input, train[target].values, batch_size=batch_size, epochs=args.epochs, verbose=2,
                         validation_split=0.2, summaryWriter=summaryWriter, test_x = test_model_input, test_y = test[target].values,
                         min_test_iteration = min_test_iteration)
-    pd.DataFrame(history.history).to_csv(config["results"]+".results.csv")
+    pd.DataFrame(history.history).to_csv(summaryWriter.log_dir + "/results.csv", index=False)
     #pred_ans = model.predict(test_model_input, 16348)
     #out_handle.write("test LogLoss: "+str( round(log_loss(test[target].values, pred_ans), 4))+"\n")
     #out_handle.write("test AUC"+str( round(roc_auc_score(test[target].values, pred_ans), 4))+"\n")
