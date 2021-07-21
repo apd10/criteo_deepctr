@@ -10,6 +10,7 @@ To run criteo with compressed embeddings - UMA  (also called RMA)
 2) Download the repo https://github.com/apd10/universal_memory_allocation
   - and run python3 setup install in that repo
 
+In the criteo_run folder
 3) CUDA_VISIBLE_DEVICES=0 python3 train_criteo_kaggle.py --config config.yml
 
 
