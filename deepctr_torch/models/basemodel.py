@@ -17,7 +17,6 @@ import torch.utils.data as Data
 from sklearn.metrics import *
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import pdb
 
 try:
     from tensorflow.python.keras.callbacks import CallbackList
@@ -141,7 +140,11 @@ class BaseModel(nn.Module):
             best_metrics = eval_result.copy()
             if (steps_per_epoch*epoch + itr + 1) > min_test_iteration and test_x is not None:
                 test_result = self.evaluate(test_x, test_y)
-    
+        if ('mse' in eval_result) and (eval_result['mse'] < best_metrics['mse']):
+            best_metrics = eval_result.copy()
+            if (steps_per_epoch*epoch + itr + 1) > min_test_iteration and test_x is not None:
+                test_result = self.evaluate(test_x, test_y)
+
         for name, result in eval_result.items():
             validation_logs['val_' + name] =  result
             validation_logs['best_val_' + name] =  best_metrics[name]
@@ -165,7 +168,7 @@ class BaseModel(nn.Module):
 
         
     def fit(self, x=None, y=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0.,
-            validation_data=None, shuffle=True, callbacks=None, summaryWriter=None, test_x=None, test_y=None, min_test_iteration=5000):
+            validation_data=None, shuffle=True, callbacks=None, summaryWriter=None, test_x=None, test_y=None, min_test_iteration=5000, eval_every=1000):
         """
 
         :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -261,6 +264,8 @@ class BaseModel(nn.Module):
         best_metrics = {}
         for name,_ in self.metrics.items():
             best_metrics[name] = 0;
+        if 'mse' in best_metrics:
+            best_metrics['mse'] = 1000000
         for epoch in range(initial_epoch, epochs):
             callbacks.on_epoch_begin(epoch)
             epoch_logs = {}
@@ -295,7 +300,7 @@ class BaseModel(nn.Module):
                                     y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64")))
 
     
-                        if do_validation and ((itr + 1) % 1000 == 0):
+                        if do_validation and ((itr + 1) % eval_every == 0):
                             validation_logs, best_metrics = self.validation_test_run(epochs, steps_per_epoch, epoch, itr, 
                                                                                     val_x, val_y, test_x, test_y, batch_size, 
                                                                                       min_test_iteration, best_metrics, summaryWriter)
@@ -376,7 +381,6 @@ class BaseModel(nn.Module):
         return np.concatenate(pred_ans).astype("float64")
 
     def input_from_feature_columns(self, X, feature_columns, embedding_dict, support_dense=True):
-
         sparse_feature_columns = list(
             filter(lambda x: isinstance(x, SparseFeat), feature_columns)) if len(feature_columns) else []
         dense_feature_columns = list(

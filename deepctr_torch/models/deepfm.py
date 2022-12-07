@@ -12,7 +12,6 @@ from .basemodel import BaseModel
 from ..inputs import combined_dnn_input
 from ..layers import FM, DNN
 
-
 class DeepFM(BaseModel):
     """Instantiates the DeepFM Network architecture.
 
@@ -65,9 +64,7 @@ class DeepFM(BaseModel):
         self.to(device)
 
     def forward(self, X):
-
-        sparse_embedding_list, dense_value_list = self.input_from_feature_columns(X, self.dnn_feature_columns,
-                                                                                  self.embedding_dict)
+        sparse_embedding_list, dense_value_list = self.input_from_feature_columns(X, self.dnn_feature_columns, self.embedding_dict)
         logit = self.linear_model(X)
 
         if self.use_fm and len(sparse_embedding_list) > 0:

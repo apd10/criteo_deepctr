@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*- 
 import pandas as pd
 import torch
 from sklearn.metrics import log_loss, roc_auc_score
@@ -28,38 +28,44 @@ def count_parameters(model):
     return strr
 
 def load_data_in_df(args, config):
-    sparse_features = ['C' + str(i) for i in range(1, 27)]
-    dense_features = ['I' + str(i) for i in range(1, 14)]
-    target = ['label']
+    x = np.load(args.data)
+    train_data = x['train']
+    test_data = x['test']
 
-    if args.test_run:
-        print("SAMPLE RUN...")
-        df =  pd.read_csv('../examples/criteo_sample.txt')
-        #df =  pd.read_csv('/home/apd10/dlrm/dlrm/input/small_data.csv')
+    data = np.concatenate([train_data, test_data], axis=0)
 
-        df[sparse_features] = df[sparse_features].fillna('-1', )
-        df[dense_features] = df[dense_features].fillna(0, )
+    x = np.loadtxt(args.data_columns, dtype=str)
+    columns = x
 
-        # 1.Label Encoding for sparse features,and do simple Transformation for dense features
-        for feat in sparse_features:
-            lbe = LabelEncoder()
-            df[feat] = lbe.fit_transform(df[feat])
-        mms = MinMaxScaler(feature_range=(0, 1))
-        df[dense_features] = mms.fit_transform(df[dense_features])
-    else:
-        handle = np.load("/home/apd10/compressed_embedding/input/data.npz")
-        if "data" in config:
-            if config["data"]["type"] == "le2":
-                print("Using le2 data")
-                handle = np.load("/home/apd10/dlrm/dlrm/input/data.le2.npz")
-            
+    df = pd.DataFrame(data, columns=columns)
 
-        intdf = pd.DataFrame(handle['intF'], columns = dense_features)
-        catdf = pd.DataFrame(handle['catF'], columns = sparse_features)
-        labeldf = pd.DataFrame(handle['label'], columns = target)
-        df  = pd.concat([labeldf, intdf, catdf], axis=1)
-        del intdf, catdf, labeldf
-        # all the above processing like label encoding, mms etc is already done in dumped data.npz
+    del df['timestamp']
+
+    sparse_features = ['userId', 'movieId']
+    target = ['rating']
+    dense_features = [c for c in df.columns if c not in sparse_features + target]
+    print(len(dense_features), len(target), len(sparse_features), len(df.columns))
+
+    df[sparse_features] = df[sparse_features].fillna('-1', )
+    df[dense_features] = df[dense_features].fillna(0, )
+    
+    for f in sparse_features + target:
+        df[f] = df[f].astype(int)
+
+
+    for feat in sparse_features:
+        lbe = LabelEncoder()
+        df[feat] = lbe.fit_transform(df[feat])
+
+    mms = MinMaxScaler(feature_range=(0, 1))
+    df[dense_features] = mms.fit_transform(df[dense_features])
+    
+    intdf = df[dense_features]
+    catdf = df[sparse_features]
+    labeldf = df[target[0]]
+    df  = pd.concat([labeldf, intdf, catdf], axis=1)
+    del intdf, catdf, labeldf
+    
     return df
 
 if __name__ == "__main__":
@@ -68,6 +74,9 @@ if __name__ == "__main__":
                     help="config to setup the training")
     parser.add_argument('--test_run', action="store_true", default=False)
     parser.add_argument('--epochs', action="store", dest="epochs", default=25, type=int)
+    parser.add_argument('--data', action="store", dest="data", default="/home/apd10/criteo_deepctr/data/ml-25m/data-small.npz", type=str)
+    parser.add_argument('--data_columns', action="store", dest="data_columns", default="/home/apd10/criteo_deepctr/data/ml-25m/columns.txt", type=str)
+    
 
     args = parser.parse_args()
     config_file = args.config
@@ -91,10 +100,11 @@ if __name__ == "__main__":
     
 
     data = load_data_in_df(args, config)
+    train_df, test_df = train_test_split(data, test_size=0.1, random_state=2023)
 
-    sparse_features = ['C' + str(i) for i in range(1, 27)]
-    dense_features = ['I' + str(i) for i in range(1, 14)]
-    target = ['label']
+    sparse_features = ['userId', 'movieId']
+    target = ['rating']
+    dense_features = [c for c in data.columns if c not in sparse_features + target]
 
     # 2.count #unique features for each sparse field,and record dense feature field name
     embedding_params = config["embedding"]
@@ -106,7 +116,7 @@ if __name__ == "__main__":
     elif embedding_params["etype"] == "rma":
         print("FIGURE OUT THE INITIALIZATION")
         hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
-                        low=-np.sqrt(1 / embedding_dim), high=np.sqrt(1 / embedding_dim), size=((embedding_params["rma"]["memory"],))
+                        low=-0.001, high=0.001, size=((embedding_params["rma"]["memory"],))
                 ).astype(np.float32)))
         fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique(), embedding_dim, use_rma=True, hashed_weight=hashed_weight)
                               for feat in sparse_features] + [DenseFeat(feat, 1, )
@@ -116,7 +126,7 @@ if __name__ == "__main__":
         print("FIGURE OUT THE INITIALIZATION")
         lma_params = embedding_params["lma"]
         hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
-                        low=-np.sqrt(1 / embedding_dim), high=np.sqrt(1 / embedding_dim), size=((lma_params["memory"],))
+                        low=-0.001, high=0.001, size=((lma_params["memory"],))
                 ).astype(np.float32)))
         signature = np.load(lma_params["signature"])["signature"]
         signature = torch.from_numpy(signature).to("cuda:0")
@@ -139,6 +149,7 @@ if __name__ == "__main__":
                                     for feat in sparse_features]  + [DenseFeat(feat, 1, ) for feat in dense_features]
     else:
         raise NotImplementedError
+
     # Question(yanzhou): why dnn_feature_columns and linear_feature_columns are the same?
     dnn_feature_columns = fixlen_feature_columns
     linear_feature_columns = fixlen_feature_columns
@@ -148,9 +159,8 @@ if __name__ == "__main__":
 
     # 3.generate input data for model
 
-    train, test = train_test_split(data, test_size=0.1, random_state=2020)
-    train_model_input = {name: train[name] for name in feature_names}
-    test_model_input = {name: test[name] for name in feature_names}
+    train_model_input = {name: train_df[name] for name in feature_names}
+    test_model_input = {name: test_df[name] for name in feature_names}
 
     # 4.Define Model,train,predict and evaluate
 
@@ -171,7 +181,7 @@ if __name__ == "__main__":
           model = DeepFM(linear_feature_columns=linear_feature_columns, dnn_feature_columns=dnn_feature_columns,
                     dnn_hidden_units=(400,400,400),
                     dnn_dropout=0.5,
-                    task='binary',
+                    task='regression',
                     l2_reg_embedding=0, l2_reg_linear=0, device=device, seed=model_seed)
     elif config["model"] == "dcn":
         params = config["dcn"]
@@ -220,19 +230,17 @@ if __name__ == "__main__":
     out_handle.write(strr)
     out_handle.flush()
 
-    model.compile("adam", "binary_crossentropy",
-                  metrics=["binary_crossentropy", "auc"], )
-    min_test_iteration = 15000 # end of 1 epoch
-    batch_size = config["train"]["batch_size"]
-    if args.test_run:
-        min_test_iteration = 1
-        batch_size = 1000
+    model.compile("adam", "mse", metrics=['mse'], )
 
-    history = model.fit(train_model_input, train[target].values, batch_size=batch_size, epochs=args.epochs, verbose=2,
-                        validation_split=0.2, summaryWriter=summaryWriter, test_x = test_model_input, test_y = test[target].values,
-                        min_test_iteration = min_test_iteration)
+    min_test_iteration = 25000 # end of 1 epoch
+    batch_size = config["train"]["batch_size"]
+
+    if args.test_run:
+        min_test_iteration = -1
+        batch_size = 128
+
+    history = model.fit(train_model_input, train_df[target].values, batch_size=batch_size, epochs=args.epochs, verbose=2,
+                        validation_split=0.2, summaryWriter=summaryWriter, test_x = test_model_input, test_y = test_df[target].values,
+                        min_test_iteration = min_test_iteration, eval_every=10000)
     pd.DataFrame(history.history).to_csv(summaryWriter.log_dir + "/results.csv", index=False)
-    #pred_ans = model.predict(test_model_input, 16348)
-    #out_handle.write("test LogLoss: "+str( round(log_loss(test[target].values, pred_ans), 4))+"\n")
-    #out_handle.write("test AUC"+str( round(roc_auc_score(test[target].values, pred_ans), 4))+"\n")
     out_handle.close()
