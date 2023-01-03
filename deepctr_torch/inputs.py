@@ -15,6 +15,7 @@ import pdb
 from hashedEmbeddingBag import HashedEmbeddingBag, SecondaryLearnedEmbedding
 from .layers.sequence import SequencePoolingLayer
 from .layers.utils import concat_fun
+from .layers.ltopic import REmbeddings
 
 DEFAULT_GROUP_NAME = "default_group"
 
@@ -22,12 +23,16 @@ DEFAULT_GROUP_NAME = "default_group"
 class SparseFeat(namedtuple('SparseFeat',
                             ['name', 'vocabulary_size', 'embedding_dim', 'use_hash', 'dtype', 'embedding_name',
                              'group_name', 'use_rma', 'hashed_weight', 'use_lma', 'signature', 'key_bits',
-                             'keys_to_use', 'use_rma_bern', 'bern_mlp_model', 'bern_embedding_dim'])):
+                             'keys_to_use', 'use_rma_bern', 'bern_mlp_model', 'bern_embedding_dim',
+                             'remb', 'mode', 'n', 'k', 'd', 'best', 'sorted_vocab', 'full_size', 'signatures'])):
+
     __slots__ = ()
 
     def __new__(cls, name, vocabulary_size, embedding_dim=4, use_hash=False, dtype="int32", embedding_name=None,
                 group_name=DEFAULT_GROUP_NAME, use_rma=False, hashed_weight=None, use_lma=False, signature=None, key_bits=None,
-                keys_to_use=None, use_rma_bern=False, bern_mlp_model=None, bern_embedding_dim=None):
+                keys_to_use=None, use_rma_bern=False, bern_mlp_model=None, bern_embedding_dim=None,
+                remb=False, mode="rma", n=None, k=None, d=None, best=False, sorted_vocab=None, full_size = None, signatures=None ):
+
         if embedding_name is None:
             embedding_name = name
         if embedding_dim == "auto":
@@ -37,7 +42,8 @@ class SparseFeat(namedtuple('SparseFeat',
                 "Notice! Feature Hashing on the fly currently is not supported in torch version,you can use tensorflow version!")
         return super(SparseFeat, cls).__new__(cls, name, vocabulary_size, embedding_dim, use_hash, dtype,
                                               embedding_name, group_name, use_rma, hashed_weight, use_lma, signature, key_bits,
-                                              keys_to_use, use_rma_bern, bern_mlp_model, bern_embedding_dim)
+                                              keys_to_use, use_rma_bern, bern_mlp_model, bern_embedding_dim,
+                                              remb, mode, n, k, d, best, sorted_vocab, full_size, signatures)
 
     def __hash__(self):
         return self.name.__hash__()
@@ -177,19 +183,23 @@ def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, spar
     val_offset = 0
 
     for feat in sparse_feature_columns + varlen_sparse_feature_columns:
-        if feat.use_rma :
+        if feat.remb and not linear:
+            dictionary[feat.embedding_name] = REmbeddings(feat.n, feat.k, feat.d, feat.sorted_vocab, feat.full_size, feat.signatures, feat.mode, feat.best)
+            val_offset += feat.vocabulary_size
+
+        elif feat.use_rma and not linear:
             weight_size = feat.hashed_weight.numel()
             compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
             dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, 1 if linear else feat.embedding_dim, compression,
-                                                                _weight=feat.hashed_weight, val_offset=val_offset, seed=seed)
+                                                                _weight=feat.hashed_weight, val_offset=val_offset, seed=seed, uma_chunk_size=4)
             val_offset += feat.vocabulary_size
-        elif feat.use_lma :
+        elif feat.use_lma and not linear:
             assert ( feat.signature is not None and feat.key_bits is not None and feat.keys_to_use is not None and feat.hashed_weight is not None)
             weight_size = feat.hashed_weight.numel()
             compression = weight_size / (feat.vocabulary_size * feat.embedding_dim)
             dictionary[feat.embedding_name] = HashedEmbeddingBag(feat.vocabulary_size, 1 if linear else feat.embedding_dim, compression,
                                                                 signature = feat.signature, key_bits=feat.key_bits, keys_to_use = feat.keys_to_use,
-                                                                hmode="lma_hash", _weight=feat.hashed_weight, val_offset=val_offset, seed=seed)
+                                                                hmode="lma_hash", _weight=feat.hashed_weight, val_offset=val_offset, seed=seed, uma_chunk_size=4)
             val_offset += feat.vocabulary_size
         elif feat.use_rma_bern and (not linear):
             primary = HashedEmbeddingBag(feat.vocabulary_size, feat.bern_embedding_dim, 0.001 , # dummy compression
@@ -205,7 +215,11 @@ def create_embedding_matrix(feature_columns, init_std=0.0001, linear=False, spar
     #         feat.dimension, embedding_size, sparse=sparse, mode=feat.combiner)
 
     for tensor in embedding_dict.values():
-        nn.init.normal_(tensor.weight, mean=0, std=init_std)
+        if type(tensor) != REmbeddings:
+            nn.init.normal_(tensor.weight, mean=0, std=init_std)
+        else:
+            for t in tensor.tables:
+                nn.init.normal_(t.weight, mean=0, std=init_std)
 
     return embedding_dict.to(device)
 

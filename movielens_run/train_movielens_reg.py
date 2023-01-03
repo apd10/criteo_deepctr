@@ -32,11 +32,12 @@ def load_data_in_df(args, config):
     train_data = x['train']
     test_data = x['test']
 
+    ltrain = train_data.shape[0]
+    ltest = test_data.shape[0]
+
     data = np.concatenate([train_data, test_data], axis=0)
 
-    x = np.loadtxt(args.data_columns, dtype=str)
-    columns = x
-
+    columns = np.loadtxt(args.data_columns, dtype=str)
     df = pd.DataFrame(data, columns=columns)
 
     del df['timestamp']
@@ -66,7 +67,7 @@ def load_data_in_df(args, config):
     df  = pd.concat([labeldf, intdf, catdf], axis=1)
     del intdf, catdf, labeldf
     
-    return df
+    return df, ltrain, ltest
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -99,8 +100,11 @@ if __name__ == "__main__":
         out_handle = sys.stdout
     
 
-    data = load_data_in_df(args, config)
-    train_df, test_df = train_test_split(data, test_size=0.1, random_state=2023)
+    data,ltrain,ltest = load_data_in_df(args, config)
+    train_df, test_df = data.head(ltrain), data.tail(ltest)
+    
+    movieIdCount = pd.value_counts(train_df['movieId'])
+    movie_id_count_df = pd.DataFrame({'movieId' : movieIdCount.index, 'count' : movieIdCount.values, 'rank' : np.arange(len(movieIdCount))})   
 
     sparse_features = ['userId', 'movieId']
     target = ['rating']
@@ -113,26 +117,67 @@ if __name__ == "__main__":
         fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique(), embedding_dim)
                                   for feat in sparse_features] + [DenseFeat(feat, 1, )
                                                                   for feat in dense_features]
+    elif embedding_params["etype"] == "remb_rma":
+        print ("FIGURE OUT THE INITIALIZATION")
+        sfeats = []
+        for feat in sparse_features:
+            if feat == "movieId":
+                pms = embedding_params["remb_rma"][feat]
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim, 
+                                    remb=True, mode=pms["mode"], n=pms["n"], k=pms["k"], d=pms["d"], best=pms["best"], sorted_vocab=torch.from_numpy(np.array(movieIdCount.index).reshape(-1)), full_size = pms["full_size"], signature=None))
+            else:
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim))
+
+        fixlen_feature_columns = sfeats  + [DenseFeat(feat, 1,) for feat in dense_features]
+
+    elif embedding_params["etype"] == "remb_mh":
+        print ("FIGURE OUT THE INITIALIZATION")
+        sfeats = []
+        for feat in sparse_features:
+            if feat == "movieId":
+                pms = embedding_params["remb_mh"][feat]
+                signatures = np.load(pms["minhashes"])["hashes"]
+                signatures = torch.from_numpy(signatures).long().to("cuda:0")
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim, 
+                                    remb=True, mode=pms["mode"], n=pms["n"], k=pms["k"], d=pms["d"], best=pms["best"], sorted_vocab=torch.from_numpy(np.array(movieIdCount.index).reshape(-1)), full_size = pms["full_size"], signatures=signatures))
+            else:
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim))
+
+        fixlen_feature_columns = sfeats  + [DenseFeat(feat, 1,) for feat in dense_features]
+
     elif embedding_params["etype"] == "rma":
         print("FIGURE OUT THE INITIALIZATION")
-        hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
-                        low=-0.001, high=0.001, size=((embedding_params["rma"]["memory"],))
-                ).astype(np.float32)))
-        fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique(), embedding_dim, use_rma=True, hashed_weight=hashed_weight)
-                              for feat in sparse_features] + [DenseFeat(feat, 1, )
-                                                              for feat in dense_features]
+        sfeats = []
+        for feat in sparse_features:
+            if feat == "movieId":
+                hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
+                          low=-0.001, high=0.001, size=(int(embedding_params["rma"]["compression"] * embedding_dim * data[feat].nunique()),)
+                  ).astype(np.float32)))
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim, use_rma=True, hashed_weight=hashed_weight))
+            else:
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim))
+
+        fixlen_feature_columns = sfeats  + [DenseFeat(feat, 1,)for feat in dense_features]
 
     elif embedding_params["etype"] == "lma":
         print("FIGURE OUT THE INITIALIZATION")
-        lma_params = embedding_params["lma"]
-        hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
-                        low=-0.001, high=0.001, size=((lma_params["memory"],))
-                ).astype(np.float32)))
-        signature = np.load(lma_params["signature"])["signature"]
-        signature = torch.from_numpy(signature).to("cuda:0")
-        fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique(), embedding_dim, use_lma=True, hashed_weight=hashed_weight, 
-                                              key_bits=lma_params["key_bits"], keys_to_use=lma_params["keys_to_use"], signature=signature)
-                                    for feat in sparse_features]  + [DenseFeat(feat, 1, ) for feat in dense_features]
+        sfeats = []
+        for feat in sparse_features:
+            if feat == "movieId":
+                print("lma for movieId")
+                lma_params = embedding_params["lma"]
+                hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
+                            low=-0.004, high=0.004, size=((lma_params["memory"],))
+                    ).astype(np.float32)))
+                signature = np.loadtxt(lma_params["signature"], dtype=np.int64)
+                signature = torch.from_numpy(signature).to("cuda:0")
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim, use_lma=True, hashed_weight=hashed_weight, 
+                                              key_bits=lma_params["key_bits"], keys_to_use=lma_params["keys_to_use"], signature=signature))
+            else:
+                sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim))
+
+
+        fixlen_feature_columns = sfeats  + [DenseFeat(feat, 1,)for feat in dense_features]
     elif embedding_params["etype"] == "rma_bern":
 
         rma_bern_params = embedding_params["rma_bern"]
@@ -241,6 +286,6 @@ if __name__ == "__main__":
 
     history = model.fit(train_model_input, train_df[target].values, batch_size=batch_size, epochs=args.epochs, verbose=2,
                         validation_split=0.2, summaryWriter=summaryWriter, test_x = test_model_input, test_y = test_df[target].values,
-                        min_test_iteration = min_test_iteration, eval_every=10000)
-    pd.DataFrame(history.history).to_csv(summaryWriter.log_dir + "/results.csv", index=False)
+                        min_test_iteration = min_test_iteration, eval_every=10000, block_eval_helper=movie_id_count_df)
+    #pd.DataFrame(history.history).to_csv(summaryWriter.log_dir + "/results.csv", index=False)
     out_handle.close()

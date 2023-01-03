@@ -17,6 +17,7 @@ import torch.utils.data as Data
 from sklearn.metrics import *
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import pandas as pd
 
 try:
     from tensorflow.python.keras.callbacks import CallbackList
@@ -132,33 +133,34 @@ class BaseModel(nn.Module):
         self.history = History()
 
 
-    def validation_test_run(self, epochs, steps_per_epoch, epoch, itr, val_x, val_y, test_x, test_y, batch_size, min_test_iteration, best_metrics, summaryWriter):
+    def validation_test_run(self, epochs, steps_per_epoch, epoch, itr, val_x, val_y, test_x, test_y, batch_size, min_test_iteration, best_metrics, summaryWriter, block_eval_helper):
         validation_logs = {}
         eval_result = self.evaluate(val_x, val_y, batch_size)
         test_result = None
         if ('auc' in eval_result) and (eval_result['auc'] > best_metrics['auc']):
             best_metrics = eval_result.copy()
             if (steps_per_epoch*epoch + itr + 1) > min_test_iteration and test_x is not None:
-                test_result = self.evaluate(test_x, test_y)
+                test_result = self.evaluate_blocks(test_x, test_y, block_eval_helper)
         if ('mse' in eval_result) and (eval_result['mse'] < best_metrics['mse']):
             best_metrics = eval_result.copy()
             if (steps_per_epoch*epoch + itr + 1) > min_test_iteration and test_x is not None:
-                test_result = self.evaluate(test_x, test_y)
+                test_result = self.evaluate_blocks(test_x, test_y, block_eval_helper)
 
         for name, result in eval_result.items():
             validation_logs['val_' + name] =  result
             validation_logs['best_val_' + name] =  best_metrics[name]
-            if test_result is not None:
-                validation_logs['test_' + name] =  test_result[name]
-            else:
-                validation_logs['test_' + name] = -1
-
 
             if summaryWriter is not None:
                 summaryWriter.add_scalar("test/val_"+name, result, epoch*steps_per_epoch + itr)
-                if test_result is not None:
-                    summaryWriter.add_scalar("test/test_"+name, test_result[name], epoch*steps_per_epoch + itr)
+
+        if test_result is not None:
+            for name, result in test_result.items():
+                validation_logs['test_' + name] =  test_result[name]
+
+            if summaryWriter is not None:
+                summaryWriter.add_scalar("test/test_"+name, test_result[name], epoch*steps_per_epoch + itr)
         return validation_logs, best_metrics
+
     def printLogInfo(self, epochs, steps_per_epoch, epoch, itr, logs):
         eval_str = 'Epoch {0}:({1}/{2}) / {3}'.format(epoch, itr, steps_per_epoch, epochs)
         for name in logs.keys():
@@ -168,7 +170,7 @@ class BaseModel(nn.Module):
 
         
     def fit(self, x=None, y=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0.,
-            validation_data=None, shuffle=True, callbacks=None, summaryWriter=None, test_x=None, test_y=None, min_test_iteration=5000, eval_every=1000):
+            validation_data=None, shuffle=True, callbacks=None, summaryWriter=None, test_x=None, test_y=None, min_test_iteration=5000, eval_every=1000, block_eval_helper=None):
         """
 
         :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
@@ -303,7 +305,7 @@ class BaseModel(nn.Module):
                         if do_validation and ((itr + 1) % eval_every == 0):
                             validation_logs, best_metrics = self.validation_test_run(epochs, steps_per_epoch, epoch, itr, 
                                                                                     val_x, val_y, test_x, test_y, batch_size, 
-                                                                                      min_test_iteration, best_metrics, summaryWriter)
+                                                                                      min_test_iteration, best_metrics, summaryWriter, block_eval_helper)
                             self.printLogInfo(epochs, steps_per_epoch, epoch, itr, validation_logs)
 
                             
@@ -322,7 +324,7 @@ class BaseModel(nn.Module):
             if do_validation:
                 validation_logs, best_metrics = self.validation_test_run(epochs, steps_per_epoch, epoch, itr, 
                                                                          val_x, val_y, test_x, test_y, batch_size, 
-                                                                         min_test_iteration, best_metrics, summaryWriter)
+                                                                         min_test_iteration, best_metrics, summaryWriter, block_eval_helper)
                 epoch_logs.update(validation_logs)
 
             # verbose
@@ -349,6 +351,39 @@ class BaseModel(nn.Module):
         eval_result = {}
         for name, metric_fun in self.metrics.items():
             eval_result[name] = metric_fun(y, pred_ans)
+        return eval_result
+
+
+    def evaluate_blocks(self, x, y, id_count_df=None, block_id='movieId', num_blocks=60, batch_size=256):
+        """
+        :param x: Numpy array of test data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).
+        :param y: Numpy array of target (label) data (if the model has a single output), or list of Numpy arrays (if the model has multiple outputs).
+        :param batch_size: Integer or `None`. Number of samples per evaluation step. If unspecified, `batch_size` will default to 256.
+        :return: Dict contains metric names and metric values.
+        """
+        if id_count_df is None:
+            return evaluate(x, y)
+
+        pred_ans = self.predict(x, batch_size)
+        eval_result = {}
+        for name, metric_fun in self.metrics.items():
+            eval_result[name] = metric_fun(y, pred_ans)
+
+        assert(id_count_df is not None)
+
+        pred_df = pd.DataFrame({'pred' : pred_ans.reshape(-1), block_id : x[block_id].values, 'y' : y.reshape(-1)})
+        combined_df = pd.merge(left=pred_df, right=id_count_df, on=block_id, how='left')
+        combined_df['rank'] = combined_df['rank'].fillna(len(id_count_df))
+        
+        for i in range(num_blocks):
+            l = i * ((len(id_count_df) + 1) / num_blocks)
+            r = l +  ((len(id_count_df) + 1) / num_blocks)
+            temp = combined_df[(combined_df['rank'] >=l) & (combined_df['rank'] < r)]
+            if len(temp) == 0:
+                continue
+            for name, metric_fun in self.metrics.items():
+                eval_result[name + '_block_' + str(i)] = metric_fun(temp['y'].values.reshape(-1,1), temp['pred'].values.reshape(-1,1))
+        
         return eval_result
 
     def predict(self, x, batch_size=256):
