@@ -121,7 +121,7 @@ if __name__ == "__main__":
         print ("FIGURE OUT THE INITIALIZATION")
         sfeats = []
         for feat in sparse_features:
-            if feat == "movieId":
+            if feat in ["movieId", "userId"]:
                 pms = embedding_params["remb_rma"][feat]
                 sfeats.append(SparseFeat(feat, data[feat].nunique(), embedding_dim, 
                                     remb=True, mode=pms["mode"], n=pms["n"], k=pms["k"], d=pms["d"], best=pms["best"], sorted_vocab=torch.from_numpy(np.array(movieIdCount.index).reshape(-1)), full_size = pms["full_size"], signature=None))
@@ -134,7 +134,7 @@ if __name__ == "__main__":
         print ("FIGURE OUT THE INITIALIZATION")
         sfeats = []
         for feat in sparse_features:
-            if feat == "movieId":
+            if feat in ["movieId", "userId"]:
                 pms = embedding_params["remb_mh"][feat]
                 signatures = np.load(pms["minhashes"])["hashes"]
                 signatures = torch.from_numpy(signatures).long().to("cuda:0")
@@ -149,7 +149,7 @@ if __name__ == "__main__":
         print("FIGURE OUT THE INITIALIZATION")
         sfeats = []
         for feat in sparse_features:
-            if feat == "movieId":
+            if feat in ["movieId", "userId"]:
                 hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
                           low=-0.001, high=0.001, size=(int(embedding_params["rma"]["compression"] * embedding_dim * data[feat].nunique()),)
                   ).astype(np.float32)))
@@ -163,8 +163,8 @@ if __name__ == "__main__":
         print("FIGURE OUT THE INITIALIZATION")
         sfeats = []
         for feat in sparse_features:
-            if feat == "movieId":
-                print("lma for movieId")
+            if feat in ["movieId", "userId"]:
+                print("lma for", feat)
                 lma_params = embedding_params["lma"]
                 hashed_weight = nn.Parameter(torch.from_numpy(np.random.uniform(
                             low=-0.004, high=0.004, size=((lma_params["memory"],))

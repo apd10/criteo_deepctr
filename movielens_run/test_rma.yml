@@ -1,0 +1,12 @@
+seed: 1
+train:
+    batch_size: 1024
+model: "deepfm"
+deepfm:
+    reg: 0
+
+embedding:
+    size: 32
+    etype: "rma"
+    rma:
+        compression: 0.5
